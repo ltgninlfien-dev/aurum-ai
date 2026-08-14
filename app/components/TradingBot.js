@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays, CalendarClock } from 'lucide-react';
 
 const STARTING_CAPITAL = 10000;
 const REFRESH_INTERVAL = 30000;
@@ -55,8 +55,7 @@ function computePeriodStats(closedTrades, startTime) {
   return { count: periodTrades.length, totalPnl, winRate };
 }
 
-// Regroupe les trades V2 (identifiés par la présence du champ `score`, absent des
-// anciens trades V1) par jour civil, du plus récent au plus ancien.
+// Regroupe les trades V2 (présence du champ `score`) par jour civil, du plus récent au plus ancien.
 function computeDailyBreakdown(closedTrades) {
   const v2Trades = closedTrades.filter(t => t.score !== undefined && t.score !== null);
 
@@ -77,6 +76,38 @@ function computeDailyBreakdown(closedTrades) {
   });
 
   return Object.values(groups).sort((a, b) => b.key.localeCompare(a.key));
+}
+
+// Regroupe les trades V2 par jour de la SEMAINE (tous les lundis ensemble, etc.),
+// agrégé sur tout l'historique — pour repérer si un jour est structurellement meilleur.
+function computeWeekdayBreakdown(closedTrades) {
+  const v2Trades = closedTrades.filter(t => t.score !== undefined && t.score !== null);
+  const dayLabels = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+  const order = [1, 2, 3, 4, 5, 6, 0]; // Lundi -> Dimanche, ordre de lecture naturel
+
+  const groups = {};
+  v2Trades.forEach(t => {
+    const d = new Date(t.closedAt);
+    const dow = d.getDay();
+    if (!groups[dow]) {
+      groups[dow] = { dow, label: dayLabels[dow], count: 0, pnl: 0, wins: 0 };
+    }
+    groups[dow].count++;
+    groups[dow].pnl += t.pnl;
+    if (t.pnl > 0) groups[dow].wins++;
+  });
+
+  return order.map(dow => {
+    const g = groups[dow];
+    if (!g) return { dow, label: dayLabels[dow], count: 0, pnl: 0, winRate: null };
+    return {
+      dow,
+      label: g.label,
+      count: g.count,
+      pnl: g.pnl,
+      winRate: Math.round((g.wins / g.count) * 1000) / 10,
+    };
+  });
 }
 
 function interpretTrade(trade) {
@@ -150,6 +181,25 @@ function DailyPnlRow({ day }) {
   );
 }
 
+function WeekdayPnlRow({ day }) {
+  const noData = day.count === 0;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #242430' }}>
+      <div className="body-font" style={{ fontSize: 13, color: noData ? '#5a5a68' : '#FFFFFF' }}>{day.label}</div>
+      {noData ? (
+        <span className="body-font" style={{ fontSize: 11, color: '#5a5a68' }}>Aucun trade</span>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{day.count} trade{day.count > 1 ? 's' : ''} &middot; {day.winRate}% win</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: day.pnl >= 0 ? '#4ade80' : '#e5555a', minWidth: 70, textAlign: 'right' }}>
+            {day.pnl >= 0 ? '+' : ''}${day.pnl.toFixed(2)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/USD' }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -212,6 +262,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
   };
   const todayClosedTrades = [...closedTrades].filter(t => t.closedAt >= startOfToday).reverse();
   const dailyBreakdown = computeDailyBreakdown(closedTrades);
+  const weekdayBreakdown = computeWeekdayBreakdown(closedTrades);
 
   const lastCycle = shadowLog.length > 0 ? shadowLog[shadowLog.length - 1] : null;
   const lastV2Result = lastCycle?.v2Result || null;
@@ -422,6 +473,14 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
           <div>
             <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
+                <CalendarClock size={15} color={ACCENT} />
+                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR JOUR DE LA SEMAINE — CUMULÉ DEPUIS LE PASSAGE EN V2</span>
+              </div>
+              {weekdayBreakdown.map(day => <WeekdayPnlRow key={day.dow} day={day} />)}
+            </div>
+
+            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
                 <CalendarDays size={15} color={ACCENT} />
                 <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR JOUR — DEPUIS LE PASSAGE EN V2</span>
               </div>
@@ -456,7 +515,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
                 <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucun trade pour l'instant.</div>
               ) : (
                 [...trades].reverse().map(t => (
-                  <div key={t.id} style={{ padding: '14px 20px', borderBottom: '1px solid #242430' }}>
+                  <div key={t.id} style={{ padding: '14px 20px', borderBottom: '1px solid #161c26' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: t.direction === 'BUY' ? '#4ade80' : '#e5555a' }}>{t.direction}</span>
