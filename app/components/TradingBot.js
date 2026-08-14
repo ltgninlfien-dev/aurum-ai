@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays } from 'lucide-react';
 
 const STARTING_CAPITAL = 10000;
 const REFRESH_INTERVAL = 30000;
@@ -53,6 +53,30 @@ function computePeriodStats(closedTrades, startTime) {
   const totalPnl = periodTrades.reduce((sum, t) => sum + t.pnl, 0);
   const winRate = Math.round((wins / periodTrades.length) * 1000) / 10;
   return { count: periodTrades.length, totalPnl, winRate };
+}
+
+// Regroupe les trades V2 (identifiés par la présence du champ `score`, absent des
+// anciens trades V1) par jour civil, du plus récent au plus ancien.
+function computeDailyBreakdown(closedTrades) {
+  const v2Trades = closedTrades.filter(t => t.score !== undefined && t.score !== null);
+
+  const groups = {};
+  v2Trades.forEach(t => {
+    const d = new Date(t.closedAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (!groups[key]) {
+      groups[key] = {
+        key,
+        label: d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }),
+        count: 0,
+        pnl: 0,
+      };
+    }
+    groups[key].count++;
+    groups[key].pnl += t.pnl;
+  });
+
+  return Object.values(groups).sort((a, b) => b.key.localeCompare(a.key));
 }
 
 function interpretTrade(trade) {
@@ -108,6 +132,20 @@ function TradeRow({ t }) {
         </div>
       )}
       <div className="body-font" style={{ fontSize: 12, color: '#b5b5c0', lineHeight: 1.5, fontStyle: 'italic' }}>{interpretTrade(t)}</div>
+    </div>
+  );
+}
+
+function DailyPnlRow({ day }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #242430' }}>
+      <div className="body-font" style={{ fontSize: 13, color: '#FFFFFF', textTransform: 'capitalize' }}>{day.label}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{day.count} trade{day.count > 1 ? 's' : ''}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: day.pnl >= 0 ? '#4ade80' : '#e5555a', minWidth: 70, textAlign: 'right' }}>
+          {day.pnl >= 0 ? '+' : ''}${day.pnl.toFixed(2)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -173,6 +211,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
     thisMonth: computePeriodStats(closedTrades, startOfMonth),
   };
   const todayClosedTrades = [...closedTrades].filter(t => t.closedAt >= startOfToday).reverse();
+  const dailyBreakdown = computeDailyBreakdown(closedTrades);
 
   const lastCycle = shadowLog.length > 0 ? shadowLog[shadowLog.length - 1] : null;
   const lastV2Result = lastCycle?.v2Result || null;
@@ -381,6 +420,18 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
 
         {activeTab === 'historique' && (
           <div>
+            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
+                <CalendarDays size={15} color={ACCENT} />
+                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR JOUR — DEPUIS LE PASSAGE EN V2</span>
+              </div>
+              {dailyBreakdown.length === 0 ? (
+                <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucun trade V2 clos pour l'instant.</div>
+              ) : (
+                dailyBreakdown.map(day => <DailyPnlRow key={day.key} day={day} />)
+              )}
+            </div>
+
             {equityCurve.length > 1 && (
               <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, padding: 20, marginBottom: 16 }}>
                 <div className="body-font" style={{ fontSize: 12, color: '#8a8a95', marginBottom: 14 }}>COURBE D'ÉQUITÉ</div>
