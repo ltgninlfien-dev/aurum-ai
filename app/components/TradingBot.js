@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays, CalendarClock } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays, CalendarClock, ChevronDown, ChevronRight } from 'lucide-react';
 
 const STARTING_CAPITAL = 10000;
 const REFRESH_INTERVAL = 30000;
@@ -78,8 +78,33 @@ function computeDailyBreakdown(closedTrades) {
   return Object.values(groups).sort((a, b) => b.key.localeCompare(a.key));
 }
 
+// Régime ADX à l'ouverture — mêmes seuils que statsEngine.js (getAdxRegime)
+function getAdxRegime(entryAdx) {
+  if (entryAdx === undefined || entryAdx === null) return 'inconnu';
+  if (entryAdx > 30) return 'tendance_forte';
+  if (entryAdx > 20) return 'tendance_moderee';
+  return 'range';
+}
+
+const REGIME_LABELS = {
+  tendance_forte: { label: 'Tendance forte', color: '#4ade80' },
+  tendance_moderee: { label: 'Tendance modérée', color: '#D4AF37' },
+  range: { label: 'Range', color: '#e5555a' },
+  inconnu: { label: 'ADX inconnu', color: '#5a5a68' },
+};
+
+// Résume un sous-ensemble de trades en {count, pnl, winRate}
+function summarizeTrades(trades) {
+  if (trades.length === 0) return { count: 0, pnl: 0, winRate: null };
+  const wins = trades.filter(t => t.pnl > 0).length;
+  const pnl = trades.reduce((sum, t) => sum + t.pnl, 0);
+  return { count: trades.length, pnl, winRate: Math.round((wins / trades.length) * 1000) / 10 };
+}
+
 // Regroupe les trades V2 par jour de la SEMAINE (tous les lundis ensemble, etc.),
 // agrégé sur tout l'historique — pour repérer si un jour est structurellement meilleur.
+// Ajoute une répartition par régime ADX à l'intérieur de chaque jour, pour distinguer
+// un vrai effet "jour" d'un effet "plus de cycles en régime range ce jour-là".
 function computeWeekdayBreakdown(closedTrades) {
   const v2Trades = closedTrades.filter(t => t.score !== undefined && t.score !== null);
   const dayLabels = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
@@ -90,22 +115,33 @@ function computeWeekdayBreakdown(closedTrades) {
     const d = new Date(t.closedAt);
     const dow = d.getDay();
     if (!groups[dow]) {
-      groups[dow] = { dow, label: dayLabels[dow], count: 0, pnl: 0, wins: 0 };
+      groups[dow] = { dow, label: dayLabels[dow], count: 0, pnl: 0, wins: 0, trades: [] };
     }
     groups[dow].count++;
     groups[dow].pnl += t.pnl;
     if (t.pnl > 0) groups[dow].wins++;
+    groups[dow].trades.push(t);
   });
 
   return order.map(dow => {
     const g = groups[dow];
-    if (!g) return { dow, label: dayLabels[dow], count: 0, pnl: 0, winRate: null };
+    if (!g) return { dow, label: dayLabels[dow], count: 0, pnl: 0, winRate: null, trades: [], byRegime: {} };
+
+    const sortedTrades = [...g.trades].sort((a, b) => b.closedAt - a.closedAt);
+    const byRegime = {
+      tendance_forte: summarizeTrades(g.trades.filter(t => getAdxRegime(t.entryAdx) === 'tendance_forte')),
+      tendance_moderee: summarizeTrades(g.trades.filter(t => getAdxRegime(t.entryAdx) === 'tendance_moderee')),
+      range: summarizeTrades(g.trades.filter(t => getAdxRegime(t.entryAdx) === 'range')),
+    };
+
     return {
       dow,
       label: g.label,
       count: g.count,
       pnl: g.pnl,
       winRate: Math.round((g.wins / g.count) * 1000) / 10,
+      trades: sortedTrades,
+      byRegime,
     };
   });
 }
@@ -182,18 +218,52 @@ function DailyPnlRow({ day }) {
 }
 
 function WeekdayPnlRow({ day }) {
+  const [expanded, setExpanded] = useState(false);
   const noData = day.count === 0;
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #242430' }}>
-      <div className="body-font" style={{ fontSize: 13, color: noData ? '#5a5a68' : '#FFFFFF' }}>{day.label}</div>
-      {noData ? (
-        <span className="body-font" style={{ fontSize: 11, color: '#5a5a68' }}>Aucun trade</span>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{day.count} trade{day.count > 1 ? 's' : ''} &middot; {day.winRate}% win</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: day.pnl >= 0 ? '#4ade80' : '#e5555a', minWidth: 70, textAlign: 'right' }}>
-            {day.pnl >= 0 ? '+' : ''}${day.pnl.toFixed(2)}
-          </span>
+    <div style={{ borderBottom: '1px solid #242430' }}>
+      <div
+        onClick={() => !noData && setExpanded(e => !e)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', cursor: noData ? 'default' : 'pointer' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!noData && (expanded ? <ChevronDown size={14} color="#8a8a95" /> : <ChevronRight size={14} color="#8a8a95" />)}
+          <div className="body-font" style={{ fontSize: 13, color: noData ? '#5a5a68' : '#FFFFFF' }}>{day.label}</div>
+        </div>
+        {noData ? (
+          <span className="body-font" style={{ fontSize: 11, color: '#5a5a68' }}>Aucun trade</span>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{day.count} trade{day.count > 1 ? 's' : ''} &middot; {day.winRate}% win</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: day.pnl >= 0 ? '#4ade80' : '#e5555a', minWidth: 70, textAlign: 'right' }}>
+              {day.pnl >= 0 ? '+' : ''}${day.pnl.toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
+      {expanded && !noData && (
+        <div style={{ background: '#0B0B0F' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: '12px 20px' }}>
+            {['tendance_forte', 'tendance_moderee', 'range'].map(regime => {
+              const r = day.byRegime?.[regime];
+              const info = REGIME_LABELS[regime];
+              return (
+                <div key={regime} style={{ background: '#1A1A22', border: `1px solid ${info.color}33`, borderRadius: 8, padding: '8px 10px' }}>
+                  <div className="body-font" style={{ fontSize: 9, color: info.color, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 4 }}>{info.label}</div>
+                  {!r || r.count === 0 ? (
+                    <div className="body-font" style={{ fontSize: 10, color: '#5a5a68' }}>Aucun trade</div>
+                  ) : (
+                    <>
+                      <div className="body-font" style={{ fontSize: 10, color: '#8a8a95' }}>{r.count} trade{r.count > 1 ? 's' : ''} &middot; {r.winRate}% win</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: r.pnl >= 0 ? '#4ade80' : '#e5555a' }}>{r.pnl >= 0 ? '+' : ''}${r.pnl.toFixed(2)}</div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {day.trades.map(t => <TradeRow key={t.id} t={t} />)}
         </div>
       )}
     </div>
