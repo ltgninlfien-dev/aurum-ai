@@ -283,11 +283,10 @@ export function calculateScore(candles, candles1h, thresholdAdjustment = 0) {
   const baseThreshold = getDynamicThreshold(currentADX);
   const threshold = Math.min(100, baseThreshold + thresholdAdjustment);
 
-  // Blocage total en régime "range" (ADX < 20) : observé empiriquement sur le shadow trading
-  // (40 trades cumulés XAU/USD + EUR/USD) que ce régime produit 0% de winrate même quand le
-  // score dépasse le seuil déjà relevé à 60. Un score élevé en range n'est pas plus fiable
-  // qu'un score faible — donc on bloque plutôt que de continuer à relever le seuil indéfiniment.
-  const isRangeRegime = currentADX !== null && currentADX <= ADX_THRESHOLDS.MODERATE_TREND.min;
+  // Blocage en régime "range" OU "tendance modérée" : confirmé sur ~246 trades V2 réels que
+  // tendance_forte (ADX>30) fait +$97.49 (43.4% win) contre tendance_moderee -$55.78 (36.3% win)
+  // sur volume comparable (122 vs 124 trades). Le bot ne trade désormais qu'en tendance forte.
+  const isRangeRegime = currentADX !== null && currentADX <= ADX_THRESHOLDS.STRONG_TREND.min;
 
   // Vérification de traction immédiate : le signal doit déjà être accompagné d'un mouvement
   // de prix récent dans le même sens. Évite d'ouvrir sur un score techniquement favorable
