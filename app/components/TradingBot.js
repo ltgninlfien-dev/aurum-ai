@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays, CalendarClock, ChevronDown, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, Target, RefreshCw, Server, ShieldCheck, History, Brain, AlertTriangle, CalendarDays, CalendarClock, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 
 const STARTING_CAPITAL = 10000;
 const REFRESH_INTERVAL = 30000;
@@ -146,6 +146,42 @@ function computeWeekdayBreakdown(closedTrades) {
   });
 }
 
+// Regroupe les trades V2 par HEURE UTC d'OUVERTURE (pas de clôture) — pour repérer
+// si un jour "faible" cache en fait un effet horaire (ex: session Londres vs NY),
+// plutôt qu'un vrai effet calendaire.
+function computeHourlyBreakdown(closedTrades) {
+  const v2Trades = closedTrades.filter(t => t.score !== undefined && t.score !== null && t.openedAt);
+
+  const groups = {};
+  v2Trades.forEach(t => {
+    const hour = new Date(t.openedAt).getUTCHours();
+    if (!groups[hour]) {
+      groups[hour] = { hour, count: 0, pnl: 0, wins: 0, trades: [] };
+    }
+    groups[hour].count++;
+    groups[hour].pnl += t.pnl;
+    if (t.pnl > 0) groups[hour].wins++;
+    groups[hour].trades.push(t);
+  });
+
+  const hours = [];
+  for (let h = 0; h < 24; h++) {
+    const g = groups[h];
+    if (!g) {
+      hours.push({ hour: h, count: 0, pnl: 0, winRate: null, trades: [] });
+    } else {
+      hours.push({
+        hour: h,
+        count: g.count,
+        pnl: g.pnl,
+        winRate: Math.round((g.wins / g.count) * 1000) / 10,
+        trades: [...g.trades].sort((a, b) => b.closedAt - a.closedAt),
+      });
+    }
+  }
+  return hours;
+}
+
 function interpretTrade(trade) {
   const won = trade.pnl >= 0;
   switch (trade.closeReason) {
@@ -270,6 +306,36 @@ function WeekdayPnlRow({ day }) {
   );
 }
 
+function HourlyPnlRow({ hourData }) {
+  const [expanded, setExpanded] = useState(false);
+  const hourLabel = `${String(hourData.hour).padStart(2, '0')}h–${String((hourData.hour + 1) % 24).padStart(2, '0')}h UTC`;
+
+  return (
+    <div style={{ borderBottom: '1px solid #242430' }}>
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', cursor: 'pointer' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {expanded ? <ChevronDown size={14} color="#8a8a95" /> : <ChevronRight size={14} color="#8a8a95" />}
+          <div className="body-font" style={{ fontSize: 13, color: '#FFFFFF' }}>{hourLabel}</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{hourData.count} trade{hourData.count > 1 ? 's' : ''} &middot; {hourData.winRate}% win</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: hourData.pnl >= 0 ? '#4ade80' : '#e5555a', minWidth: 70, textAlign: 'right' }}>
+            {hourData.pnl >= 0 ? '+' : ''}${hourData.pnl.toFixed(2)}
+          </span>
+        </div>
+      </div>
+      {expanded && (
+        <div style={{ background: '#0B0B0F' }}>
+          {hourData.trades.map(t => <TradeRow key={t.id} t={t} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/USD' }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -333,6 +399,8 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
   const todayClosedTrades = [...closedTrades].filter(t => t.closedAt >= startOfToday).reverse();
   const dailyBreakdown = computeDailyBreakdown(closedTrades);
   const weekdayBreakdown = computeWeekdayBreakdown(closedTrades);
+  const hourlyBreakdownAll = computeHourlyBreakdown(closedTrades);
+  const hourlyBreakdown = hourlyBreakdownAll.filter(h => h.count > 0);
 
   const lastCycle = shadowLog.length > 0 ? shadowLog[shadowLog.length - 1] : null;
   const lastV2Result = lastCycle?.v2Result || null;
@@ -547,6 +615,18 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
                 <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR JOUR DE LA SEMAINE — CUMULÉ DEPUIS LE PASSAGE EN V2</span>
               </div>
               {weekdayBreakdown.map(day => <WeekdayPnlRow key={day.dow} day={day} />)}
+            </div>
+
+            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
+                <Clock size={15} color={ACCENT} />
+                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR HEURE D'OUVERTURE (UTC) — CUMULÉ DEPUIS LE PASSAGE EN V2</span>
+              </div>
+              {hourlyBreakdown.length === 0 ? (
+                <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucun trade V2 clos pour l'instant.</div>
+              ) : (
+                hourlyBreakdown.map(h => <HourlyPnlRow key={h.hour} hourData={h} />)
+              )}
             </div>
 
             <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
