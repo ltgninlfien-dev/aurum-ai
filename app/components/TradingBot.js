@@ -578,7 +578,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
                       <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>score {lastV2Result.score?.toFixed(1)} / seuil {lastV2Result.threshold}</span>
                     </div>
                     <div className="body-font" style={{ fontSize: 12, color: '#b5b5c0' }}>ADX : {lastV2Result.adx != null ? lastV2Result.adx.toFixed(1) : '—'}</div>
-                    {lastV2Result.blockedByRangeRegime && <div className="body-font" style={{ fontSize: 12, color: ACCENT, marginTop: 4 }}>⚠ Bloqué : régime range (ADX≤20)</div>}
+                    {lastV2Result.blockedByRangeRegime && <div className="body-font" style={{ fontSize: 12, color: ACCENT, marginTop: 4 }}>⚠ Bloqué : hors tendance forte (ADX≤30)</div>}
                     {lastV2Result.blockedByNoMomentum && <div className="body-font" style={{ fontSize: 12, color: ACCENT, marginTop: 4 }}>⚠ Bloqué : pas de momentum d'entrée</div>}
                   </>
                 ) : <div className="body-font" style={{ fontSize: 13, color: '#8a8a95' }}>Pas encore de cycle enregistré.</div>}
