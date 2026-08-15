@@ -182,6 +182,21 @@ function computeHourlyBreakdown(closedTrades) {
   return hours;
 }
 
+// Regroupe les trades V2 par RÉGIME ADX (tendance forte / modérée / range), et à
+// l'intérieur de chaque régime, par heure UTC d'ouverture — pour repérer précisément
+// à quelles heures un régime donné (ex: tendance forte) est réellement rentable.
+function computeRegimeBreakdown(closedTrades) {
+  const v2Trades = closedTrades.filter(t => t.score !== undefined && t.score !== null);
+  const regimes = ['tendance_forte', 'tendance_moderee', 'range'];
+
+  return regimes.map(regime => {
+    const regimeTrades = v2Trades.filter(t => getAdxRegime(t.entryAdx) === regime);
+    const summary = summarizeTrades(regimeTrades);
+    const hourly = computeHourlyBreakdown(regimeTrades).filter(h => h.count > 0);
+    return { regime, ...summary, hourly };
+  });
+}
+
 function interpretTrade(trade) {
   const won = trade.pnl >= 0;
   switch (trade.closeReason) {
@@ -336,6 +351,48 @@ function HourlyPnlRow({ hourData }) {
   );
 }
 
+// Carte de régime cliquable — déplie la répartition par heure UTC à l'intérieur
+// de ce régime, pour repérer précisément quelles heures sont rentables quand le
+// marché est en tendance forte (par exemple), toutes journées confondues.
+function RegimeCard({ data }) {
+  const [expanded, setExpanded] = useState(false);
+  const info = REGIME_LABELS[data.regime];
+  const noData = data.count === 0;
+
+  return (
+    <div style={{ background: '#1A1A22', border: `1px solid ${info.color}33`, borderRadius: 10, overflow: 'hidden' }}>
+      <div
+        onClick={() => !noData && setExpanded(e => !e)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: noData ? 'default' : 'pointer' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!noData && (expanded ? <ChevronDown size={14} color="#8a8a95" /> : <ChevronRight size={14} color="#8a8a95" />)}
+          <div className="body-font" style={{ fontSize: 12, color: info.color, textTransform: 'uppercase', letterSpacing: 0.3 }}>{info.label}</div>
+        </div>
+        {noData ? (
+          <span className="body-font" style={{ fontSize: 11, color: '#5a5a68' }}>Aucun trade</span>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{data.count} trade{data.count > 1 ? 's' : ''} &middot; {data.winRate}% win</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: data.pnl >= 0 ? '#4ade80' : '#e5555a', minWidth: 60, textAlign: 'right' }}>
+              {data.pnl >= 0 ? '+' : ''}${data.pnl.toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
+      {expanded && !noData && (
+        <div style={{ borderTop: `1px solid ${info.color}33` }}>
+          {data.hourly.length === 0 ? (
+            <div className="body-font" style={{ padding: '12px 16px', fontSize: 11, color: '#5a5a68' }}>Pas d'heure d'ouverture enregistrée.</div>
+          ) : (
+            data.hourly.map(h => <HourlyPnlRow key={h.hour} hourData={h} />)
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/USD' }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -401,6 +458,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
   const weekdayBreakdown = computeWeekdayBreakdown(closedTrades);
   const hourlyBreakdownAll = computeHourlyBreakdown(closedTrades);
   const hourlyBreakdown = hourlyBreakdownAll.filter(h => h.count > 0);
+  const regimeBreakdown = computeRegimeBreakdown(closedTrades);
 
   const lastCycle = shadowLog.length > 0 ? shadowLog[shadowLog.length - 1] : null;
   const lastV2Result = lastCycle?.v2Result || null;
@@ -609,6 +667,16 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
 
         {activeTab === 'historique' && (
           <div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <TrendingUp size={15} color={ACCENT} />
+                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>RÉGIME ADX — HEURES RENTABLES (TOUS JOURS CONFONDUS)</span>
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {regimeBreakdown.map(r => <RegimeCard key={r.regime} data={r} />)}
+              </div>
+            </div>
+
             <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
                 <CalendarClock size={15} color={ACCENT} />
