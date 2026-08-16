@@ -142,7 +142,8 @@ export async function runShadowCycle(state, candles5min, candles1h, symbol) {
     // Vérification contextuelle IA — uniquement à ce moment précis (pas à chaque cycle),
     // pour rester sobre en coût. N'écrase jamais un signal technique sur une simple hésitation ;
     // ne bloque que si un risque "high" est détecté (événement macro majeur imminent/en cours).
-    const aiCheck = await checkTradeContext(symbol, v2Result.direction, v2Result);
+    const recentCandles = candles5min.slice(-15);
+    const aiCheck = await checkTradeContext(symbol, v2Result.direction, v2Result, recentCandles);
 
     if (aiCheck.riskLevel === 'high') {
       return {
