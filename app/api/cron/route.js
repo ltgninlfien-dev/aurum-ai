@@ -211,7 +211,11 @@ export async function GET(request) {
     }
 
     const prevState = state;
-    const newState = await runShadowCycle(state, candles5min, candles1h, SYMBOL);
+    // { applyObservationWindow: true } — réservé au bot réel : aucune nouvelle position
+    // n'est ouverte de vendredi 21h UTC à mardi 23h UTC (fermeture weekend incluse).
+    // Le shadow (app/api/shadow/route.js) appelle la même fonction sans cette option,
+    // et continue donc de trader normalement pour garder une base de comparaison.
+    const newState = await runShadowCycle(state, candles5min, candles1h, SYMBOL, { applyObservationWindow: true });
 
     newState.priceHistory = raw5min
       .map(v => ({ time: v.datetime.slice(5, 16), price: parseFloat(v.close) }))
