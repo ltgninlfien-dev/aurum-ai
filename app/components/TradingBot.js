@@ -133,6 +133,8 @@ function computeWeekdayBreakdown(closedTrades) {
       tendance_moderee: summarizeTrades(g.trades.filter(t => getAdxRegime(t.entryAdx) === 'tendance_moderee')),
       range: summarizeTrades(g.trades.filter(t => getAdxRegime(t.entryAdx) === 'range')),
     };
+    // Croisement JOUR × HEURE : répartition horaire UTC des trades de CE jour précis uniquement
+    const hourly = computeHourlyBreakdown(g.trades).filter(h => h.count > 0);
 
     return {
       dow,
@@ -142,6 +144,7 @@ function computeWeekdayBreakdown(closedTrades) {
       winRate: Math.round((g.wins / g.count) * 1000) / 10,
       trades: sortedTrades,
       byRegime,
+      hourly,
     };
   });
 }
@@ -233,6 +236,48 @@ function interpretTrade(trade) {
   }
 }
 
+function AICheckBadge({ aiCheck }) {
+  if (!aiCheck || !aiCheck.available) return null;
+  const colors = { low: '#4ade80', medium: '#D4AF37', high: '#e5555a' };
+  const labels = { low: 'IA : risque faible', medium: 'IA : à surveiller', high: 'IA : risque élevé' };
+  const color = colors[aiCheck.riskLevel] || '#8a8a95';
+
+  return (
+    <div style={{ marginTop: 6, padding: '6px 10px', background: `${color}14`, border: `1px solid ${color}33`, borderRadius: 6 }}>
+      <div className="body-font" style={{ fontSize: 10, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2 }}>
+        {labels[aiCheck.riskLevel] || 'IA'}
+      </div>
+      {aiCheck.note && <div className="body-font" style={{ fontSize: 11, color: '#b5b5c0', lineHeight: 1.4 }}>{aiCheck.note}</div>}
+    </div>
+  );
+}
+
+// Une ligne de l'historique complet des vérifications IA — trades ouverts par l'IA
+// ET décisions bloquées (trade jamais créé) affichés côte à côte chronologiquement.
+function AIHistoryRow({ entry }) {
+  const colors = { low: '#4ade80', medium: '#D4AF37', high: '#e5555a' };
+  const color = colors[entry.aiCheck.riskLevel] || '#8a8a95';
+
+  return (
+    <div style={{ padding: '12px 20px', borderBottom: '1px solid #242430' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {entry.blocked && <span className="body-font" style={{ fontSize: 9, fontWeight: 700, color: '#e5555a', border: '1px solid #e5555a55', borderRadius: 4, padding: '1px 6px', textTransform: 'uppercase' }}>Bloqué</span>}
+          <span style={{ fontSize: 12, fontWeight: 700, color: entry.direction === 'BUY' ? '#4ade80' : entry.direction === 'SELL' ? '#e5555a' : '#8a8a95' }}>{entry.direction}</span>
+          <span className="body-font" style={{ fontSize: 11, color: '#8a8a95' }}>{entry.outcome}</span>
+        </div>
+        <span className="body-font" style={{ fontSize: 10, color: '#5a5a68' }}>{new Date(entry.timestamp).toLocaleString('fr-FR')}</span>
+      </div>
+      <div style={{ padding: '6px 10px', background: `${color}14`, border: `1px solid ${color}33`, borderRadius: 6 }}>
+        <div className="body-font" style={{ fontSize: 10, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2 }}>
+          {entry.aiCheck.riskLevel === 'high' ? 'Risque élevé' : entry.aiCheck.riskLevel === 'medium' ? 'À surveiller' : 'Risque faible'}
+        </div>
+        {entry.aiCheck.note && <div className="body-font" style={{ fontSize: 11, color: '#b5b5c0', lineHeight: 1.4 }}>{entry.aiCheck.note}</div>}
+      </div>
+    </div>
+  );
+}
+
 function TradeRow({ t }) {
   return (
     <div style={{ padding: '14px 20px', borderBottom: '1px solid #242430' }}>
@@ -250,6 +295,7 @@ function TradeRow({ t }) {
         </div>
       )}
       <div className="body-font" style={{ fontSize: 12, color: '#b5b5c0', lineHeight: 1.5, fontStyle: 'italic' }}>{interpretTrade(t)}</div>
+      <AICheckBadge aiCheck={t.aiCheck} />
     </div>
   );
 }
@@ -314,6 +360,14 @@ function WeekdayPnlRow({ day }) {
               );
             })}
           </div>
+          {day.hourly.length > 0 && (
+            <div style={{ padding: '0 20px 8px' }}>
+              <div className="body-font" style={{ fontSize: 9, color: '#5a5a68', textTransform: 'uppercase', letterSpacing: 0.3, padding: '6px 0' }}>Répartition par heure UTC — {day.label}</div>
+              <div style={{ background: '#1A1A22', borderRadius: 8, overflow: 'hidden', border: '1px solid #2c2c38' }}>
+                {day.hourly.map(h => <HourlyPnlRow key={h.hour} hourData={h} />)}
+              </div>
+            </div>
+          )}
           {day.trades.map(t => <TradeRow key={t.id} t={t} />)}
         </div>
       )}
@@ -462,6 +516,35 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
 
   const lastCycle = shadowLog.length > 0 ? shadowLog[shadowLog.length - 1] : null;
   const lastV2Result = lastCycle?.v2Result || null;
+
+  // Historique complet des vérifications IA : trades clos + position ouverte (si elle a un
+  // aiCheck) + cycles où l'IA a bloqué une ouverture (skipped_ai_risk, pas de trade créé).
+  // Fusionné et trié du plus récent au plus ancien pour une vue chronologique complète.
+  const aiHistory = [
+    ...trades.filter(t => t.aiCheck).map(t => ({
+      timestamp: t.openedAt,
+      aiCheck: t.aiCheck,
+      blocked: false,
+      direction: t.direction,
+      outcome: `Clôturé ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}`,
+    })),
+    ...(openPosition?.aiCheck ? [{
+      timestamp: openPosition.openedAt,
+      aiCheck: openPosition.aiCheck,
+      blocked: false,
+      direction: openPosition.direction,
+      outcome: 'Position actuellement ouverte',
+    }] : []),
+    ...shadowLog
+      .filter(entry => entry.outcome === 'skipped_ai_risk' && entry.aiCheck)
+      .map(entry => ({
+        timestamp: entry.timestamp,
+        aiCheck: entry.aiCheck,
+        blocked: true,
+        direction: entry.v2Result?.direction || '—',
+        outcome: "Trade bloqué par l'IA",
+      })),
+  ].sort((a, b) => b.timestamp - a.timestamp);
 
   const minutesSinceCheck = lastCheckedAt ? Math.round((Date.now() - lastCheckedAt) / 60000) : null;
   const positionStatusKey = getPositionStatus(openPosition);
@@ -613,6 +696,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
                       <div className="body-font" style={{ fontSize: 12, color: '#b5b5c0' }}>Pic de profit atteint: ${openPosition.peakUnrealizedPnl.toFixed(2)}</div>
                     )}
                     <div className="body-font" style={{ fontSize: 12, color: '#b5b5c0' }}>Ouvert: {new Date(openPosition.openedAt).toLocaleString('fr-FR')}</div>
+                    <AICheckBadge aiCheck={openPosition.aiCheck} />
                     <div style={{ display: 'flex', gap: 20, marginTop: 12, paddingTop: 12, borderTop: '1px solid #2c2c38', flexWrap: 'wrap' }}>
                       <div>
                         <div className="body-font" style={{ fontSize: 10, color: '#8a8a95', textTransform: 'uppercase' }}>Stop-loss actuel</div>
@@ -667,6 +751,18 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
 
         {activeTab === 'historique' && (
           <div>
+            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
+                <Brain size={15} color={ACCENT} />
+                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>HISTORIQUE DES VÉRIFICATIONS IA</span>
+              </div>
+              {aiHistory.length === 0 ? (
+                <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucune vérification IA enregistrée pour l'instant (clé API absente ou pas encore de signal déclenché).</div>
+              ) : (
+                aiHistory.slice(0, 30).map((entry, i) => <AIHistoryRow key={`${entry.timestamp}-${i}`} entry={entry} />)
+              )}
+            </div>
+
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <TrendingUp size={15} color={ACCENT} />
