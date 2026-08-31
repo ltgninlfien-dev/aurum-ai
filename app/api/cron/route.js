@@ -211,11 +211,11 @@ export async function GET(request) {
     }
 
     const prevState = state;
-    // { applyObservationWindow: true } — réservé au bot réel : aucune nouvelle position
-    // n'est ouverte de vendredi 21h UTC à mardi 23h UTC (fermeture weekend incluse).
-    // Le shadow (app/api/shadow/route.js) appelle la même fonction sans cette option,
-    // et continue donc de trader normalement pour garder une base de comparaison.
-    const newState = await runShadowCycle(state, candles5min, candles1h, SYMBOL, { applyObservationWindow: true });
+    // Fenêtre d'observation (Ven21h→Mar23h) retirée : le nouveau filtre horaire dans
+    // scoreEngine.js (BLOCKED_HOURS_UTC) fait ce travail plus précisément, heure par heure,
+    // plutôt que de bloquer des jours entiers. La fermeture weekend (marché réellement
+    // fermé) reste appliquée automatiquement par shadowEngine.js, sans option nécessaire.
+    const newState = await runShadowCycle(state, candles5min, candles1h, SYMBOL);
 
     newState.priceHistory = raw5min
       .map(v => ({ time: v.datetime.slice(5, 16), price: parseFloat(v.close) }))
