@@ -206,6 +206,30 @@ export async function runShadowCycle(state, candles5min, candles1h, symbol, opti
     };
   }
 
+  // --- Signal qui aurait qualifié, mais bloqué uniquement par le filtre horaire ---
+  // (score suffisant, régime ADX en tendance forte, momentum confirmé — seule l'heure bloque)
+  // Loggé distinctement pour pouvoir mesurer l'impact réel du filtre BLOCKED_HOURS_UTC,
+  // plutôt que de le noyer dans le 'no_action' générique en fin de cycle.
+  if (
+    v2Result.blockedByHour &&
+    !v2Result.blockedByRangeRegime &&
+    !v2Result.blockedByNoMomentum &&
+    v2Result.score >= v2Result.threshold
+  ) {
+    return {
+      trades,
+      openPosition,
+      account,
+      params,
+      shadowLog: logShadowEntry(shadowLog, {
+        timestamp: Date.now(),
+        v2Result,
+        outcome: 'observation_hour',
+      }),
+      lastCheckedAt: Date.now(),
+    };
+  }
+
   // --- Aucune position ouverte : on envisage une ouverture si le score le permet ---
   if (v2Result.shouldTrade && v2Result.direction !== 'NEUTRAL') {
     if (applyObservationWindow && isObservationWindow()) {
