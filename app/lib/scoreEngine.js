@@ -21,6 +21,14 @@ const ADX_THRESHOLDS = {
   RANGE: { min: 0, threshold: 60 },           // ADX < 20 → range, très sélectif
 };
 
+// Heures UTC bloquées à l'ouverture — 07h-10h (transition Asie/Londres, souvent chop)
+// et 12h-15h (creux de liquidité fin de matinée Londres avant NY) : sur ~246 trades V2,
+// ces deux blocs concentrent les pertes les plus nettes sur les plus gros échantillons
+// (37 et 48 trades respectivement). À l'essai pour une semaine — ces chiffres mélangent
+// encore l'ancien filtre (tendance forte+modérée) et le nouveau (tendance forte seule),
+// donc à reconfirmer une fois qu'on aura assez de données post-changement de filtre ADX.
+const BLOCKED_HOURS_UTC = [7, 8, 9, 12, 13, 14];
+
 // Volatilité minimum (ATR en % du prix) en dessous de laquelle on considère le marché trop calme
 const VOLATILITY_MIN_PERCENT = 0.05; // à calibrer avec l'historique réel XAU/USD et EUR/USD
 
@@ -293,7 +301,11 @@ export function calculateScore(candles, candles1h, thresholdAdjustment = 0) {
   // mais dont le marché ne montre encore aucune conviction réelle dans cette direction.
   const hasEntryMomentum = checkEntryMomentum(candles, direction);
 
-  const shouldTrade = !isRangeRegime && hasEntryMomentum && score >= threshold;
+  // Blocage horaire : voir BLOCKED_HOURS_UTC ci-dessus pour le raisonnement.
+  const currentHourUTC = new Date().getUTCHours();
+  const isBlockedHour = BLOCKED_HOURS_UTC.includes(currentHourUTC);
+
+  const shouldTrade = !isRangeRegime && !isBlockedHour && hasEntryMomentum && score >= threshold;
 
   return {
     score: Math.round(score * 100) / 100,
@@ -302,6 +314,7 @@ export function calculateScore(candles, candles1h, thresholdAdjustment = 0) {
     threshold,
     shouldTrade,
     blockedByRangeRegime: isRangeRegime,
+    blockedByHour: isBlockedHour,
     blockedByNoMomentum: !hasEntryMomentum,
     breakdown: { trend, macd, rsi, h1Confirmation: h1, volatility },
   };
