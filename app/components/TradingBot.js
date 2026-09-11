@@ -408,6 +408,28 @@ function HourlyPnlRow({ hourData }) {
 // Carte de régime cliquable — déplie la répartition par heure UTC à l'intérieur
 // de ce régime, pour repérer précisément quelles heures sont rentables quand le
 // marché est en tendance forte (par exemple), toutes journées confondues.
+// Section repliable — clique sur l'en-tête pour masquer/afficher le contenu.
+// Utilisée pour les gros blocs de l'onglet historique, afin d'éviter d'avoir à tout
+// faire défiler pour atteindre une section précise.
+function CollapsibleSection({ icon: Icon, title, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: open ? '1px solid #2c2c38' : 'none', cursor: 'pointer' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon size={15} color={ACCENT} />
+          <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>{title}</span>
+        </div>
+        {open ? <ChevronDown size={16} color="#8a8a95" /> : <ChevronRight size={16} color="#8a8a95" />}
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
 function RegimeCard({ data }) {
   const [expanded, setExpanded] = useState(false);
   const info = REGIME_LABELS[data.regime];
@@ -751,59 +773,39 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
 
         {activeTab === 'historique' && (
           <div>
-            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
-                <Brain size={15} color={ACCENT} />
-                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>HISTORIQUE DES VÉRIFICATIONS IA</span>
-              </div>
+            <CollapsibleSection icon={Brain} title="HISTORIQUE DES VÉRIFICATIONS IA">
               {aiHistory.length === 0 ? (
                 <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucune vérification IA enregistrée pour l'instant (clé API absente ou pas encore de signal déclenché).</div>
               ) : (
                 aiHistory.slice(0, 30).map((entry, i) => <AIHistoryRow key={`${entry.timestamp}-${i}`} entry={entry} />)
               )}
-            </div>
+            </CollapsibleSection>
 
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <TrendingUp size={15} color={ACCENT} />
-                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>RÉGIME ADX — HEURES RENTABLES (TOUS JOURS CONFONDUS)</span>
-              </div>
-              <div style={{ display: 'grid', gap: 8 }}>
+            <CollapsibleSection icon={TrendingUp} title="RÉGIME ADX — HEURES RENTABLES (TOUS JOURS CONFONDUS)">
+              <div style={{ display: 'grid', gap: 8, padding: 16 }}>
                 {regimeBreakdown.map(r => <RegimeCard key={r.regime} data={r} />)}
               </div>
-            </div>
+            </CollapsibleSection>
 
-            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
-                <CalendarClock size={15} color={ACCENT} />
-                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR JOUR DE LA SEMAINE — CUMULÉ DEPUIS LE PASSAGE EN V2</span>
-              </div>
+            <CollapsibleSection icon={CalendarClock} title="BILAN PAR JOUR DE LA SEMAINE — CUMULÉ DEPUIS LE PASSAGE EN V2">
               {weekdayBreakdown.map(day => <WeekdayPnlRow key={day.dow} day={day} />)}
-            </div>
+            </CollapsibleSection>
 
-            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
-                <Clock size={15} color={ACCENT} />
-                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR HEURE D'OUVERTURE (UTC) — CUMULÉ DEPUIS LE PASSAGE EN V2</span>
-              </div>
+            <CollapsibleSection icon={Clock} title="BILAN PAR HEURE D'OUVERTURE (UTC) — CUMULÉ DEPUIS LE PASSAGE EN V2">
               {hourlyBreakdown.length === 0 ? (
                 <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucun trade V2 clos pour l'instant.</div>
               ) : (
                 hourlyBreakdown.map(h => <HourlyPnlRow key={h.hour} hourData={h} />)
               )}
-            </div>
+            </CollapsibleSection>
 
-            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
-                <CalendarDays size={15} color={ACCENT} />
-                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>BILAN PAR JOUR — DEPUIS LE PASSAGE EN V2</span>
-              </div>
+            <CollapsibleSection icon={CalendarDays} title="BILAN PAR JOUR — DEPUIS LE PASSAGE EN V2">
               {dailyBreakdown.length === 0 ? (
                 <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucun trade V2 clos pour l'instant.</div>
               ) : (
                 dailyBreakdown.map(day => <DailyPnlRow key={day.key} day={day} />)
               )}
-            </div>
+            </CollapsibleSection>
 
             {equityCurve.length > 1 && (
               <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, padding: 20, marginBottom: 16 }}>
@@ -820,11 +822,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
                 </ResponsiveContainer>
               </div>
             )}
-            <div style={{ background: '#1A1A22', border: '1px solid #2c2c38', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', borderBottom: '1px solid #2c2c38' }}>
-                <History size={15} color={ACCENT} />
-                <span className="body-font" style={{ fontSize: 12, color: '#8a8a95', letterSpacing: 0.5 }}>JOURNAL DES TRADES</span>
-              </div>
+            <CollapsibleSection icon={History} title="JOURNAL DES TRADES">
               {trades.length === 0 ? (
                 <div className="body-font" style={{ padding: 24, fontSize: 13, color: '#8a8a95' }}>Aucun trade pour l'instant.</div>
               ) : (
@@ -855,7 +853,7 @@ export default function TradingBot({ apiPath = '/api/state', symbolLabel = 'XAU/
                   </div>
                 ))
               )}
-            </div>
+            </CollapsibleSection>
           </div>
         )}
       </div>
