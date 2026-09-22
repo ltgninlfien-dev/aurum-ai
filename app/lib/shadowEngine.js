@@ -38,18 +38,18 @@ function isWeekendClosureWindow(date = new Date()) {
   return false;
 }
 
-// Fenêtre d'observation étendue : de vendredi 21h UTC à mardi 23h UTC, le bot RÉEL
-// n'ouvre aucune nouvelle position — il continue de calculer le score et de logger
-// chaque cycle, mais reste en pure observation pendant la réouverture du marché
-// (période jugée plus imprévisible : gaps, faible liquidité en début de semaine).
-// Optionnelle : seul le bot réel l'applique (via options.applyObservationWindow),
-// le shadow continue de trader normalement pour garder une base de comparaison.
+// Fenêtre d'observation post-réouverture : le bot RÉEL n'ouvre aucune nouvelle position
+// pendant les 15 premières heures après la réouverture du marché (lundi 00h→15h UTC,
+// puisque dimanche est traité comme fermeture complète — voir isWeekendClosureWindow
+// ci-dessus), ni le mardi avant 13h UTC (avant le chevauchement Londres/New York).
+// Il continue de calculer le score et de logger chaque cycle, mais reste en pure
+// observation ces créneaux-là. Optionnelle : seul le bot réel l'applique (via
+// options.applyObservationWindow), le shadow continue de trader normalement.
 function isObservationWindow(date = new Date()) {
-  const day = date.getUTCDay(); // 0 = Dimanche ... 5 = Vendredi, 6 = Samedi
+  const day = date.getUTCDay(); // 0 = Dimanche, 1 = Lundi, 2 = Mardi ...
   const hour = date.getUTCHours();
-  if (day === 5 && hour >= 21) return true; // Vendredi dès 21h UTC
-  if (day === 6 || day === 0 || day === 1) return true; // Samedi, Dimanche, Lundi entiers
-  if (day === 2 && hour < 23) return true; // Mardi jusqu'à 23h UTC
+  if (day === 1 && hour < 15) return true; // Lundi avant 15h UTC
+  if (day === 2 && hour < 13) return true; // Mardi avant 13h UTC
   return false;
 }
 
